@@ -648,23 +648,27 @@ pip install .
 | [`convert_wiki_data.py`](scripts/data_processing/convert_wiki_data.py) | 处理 Wiki 数据（`synthesized_Wikipedia-style_rephrasing` 字段） |
 | [`convert_all_data.py`](scripts/data_processing/convert_all_data.py) | **综合处理**：同时处理 QA 和 Wiki 数据并按比例混合 |
 
+#### 数据格式
+
+**输入数据格式：** 每条记录同时包含 QA 和 Wiki 数据：
+
+```json
+{
+  "synthesized_QA": "Question: 问题1 Answer: 答案1 Question: 问题2 Answer: 答案2",
+  "synthesized_Wikipedia-style_rephrasing": "Wiki 百科风格改写文本内容..."
+}
+```
+
+**输出数据格式：** Alpaca 格式
+
+```json
+{"instruction": "问题", "input": "", "output": "答案"}
+{"instruction": "请续写或扩展以下文本：", "input": "", "output": "Wiki 文本内容"}
+```
+
 #### 使用示例
 
-**处理 QA 数据：**
-```bash
-python scripts/data_processing/convert_qa_data.py \
-    --input_dir /path/to/qa_data \
-    --output_dir data/my_qa_data
-```
-
-**处理 Wiki 数据：**
-```bash
-python scripts/data_processing/convert_wiki_data.py \
-    --input_dir /path/to/wiki_data \
-    --output_dir data/my_wiki_data
-```
-
-**混合处理 QA 和 Wiki 数据：**
+**混合处理 QA 和 Wiki 数据（推荐）：**
 ```bash
 python scripts/data_processing/convert_all_data.py \
     --input_dir /path/to/your/data \
@@ -673,8 +677,50 @@ python scripts/data_processing/convert_all_data.py \
     --wiki_weight 0.3
 ```
 
+**参数说明：**
+- `--input_dir`: 输入目录，包含 jsonl 文件
+- `--output_dir`: 输出目录
+- `--qa_weight`: QA 数据权重（如 0.7）
+- `--wiki_weight`: Wiki 数据权重（如 0.3）
+
 > [!TIP]
-> 当 QA 和 Wiki 数据在同一条记录的不同字段中时（推荐使用 `convert_all_data.py`），脚本会自动解析 `synthesized_QA` 和 `synthesized_Wikipedia-style_rephrasing` 字段并按权重比例混合输出。
+> 脚本会自动解析 `synthesized_QA` 和 `synthesized_Wikipedia-style_rephrasing` 字段，按权重比例混合输出，并生成 `dataset_info.json` 配置文件。
+
+### 自定义数据集评测
+
+本项目集成了 OpenCompass 评测框架，位于 [`opencompass/`](opencompass/) 目录下，可用于评测微调后的模型。
+
+#### 添加自定义评测数据集
+
+在 [`opencompass/configs/datasets/`](opencompass/configs/datasets/) 目录下创建评测配置文件，例如 [`custom_mcq_gen.py`](opencompass/configs/datasets/custom_mcq_gen.py)：
+
+```python
+from opencompass.datasets import CustomDataset
+from opencompass.openicl.icl_evaluator import AccEvaluator
+
+datasets.append(dict(
+    abbr='custom_mcq',
+    type=CustomDataset,
+    path='/path/to/your/dataset.jsonl',
+    reader_cfg=dict(
+        input_columns=['question', 'A', 'B', 'C', 'D'],
+        output_column='answer',
+    ),
+    infer_cfg=custom_infer_cfg,
+    eval_cfg=custom_eval_cfg,
+))
+```
+
+#### 运行评测
+
+```bash
+cd opencompass
+python run.py --datasets custom_mcq_gen \
+    --models hf_qwen2_5_7b_instruct \
+    -a lmdeploy
+```
+
+更多自定义数据集评测方法，请参考 [OpenCompass 自定义数据集文档](opencompass/docs/zh_cn/advanced_guides/custom_dataset.md)。
 
 ### 快速开始
 
