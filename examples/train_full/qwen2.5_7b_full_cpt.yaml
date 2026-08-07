@@ -1,0 +1,59 @@
+### model
+model_name_or_path: /home/hzs/260304/models/Qwen/Qwen2.5-7B-Instruct
+trust_remote_code: true
+
+### method
+stage: pt                         # PT (预训练/继续预训练)
+do_train: true
+finetuning_type: full             # 全参数训练 (不使用LoRA)
+deepspeed: examples/deepspeed/ds_z2_config.json  # ZeRO-2
+
+### dataset
+# 主训练阶段 + 退火阶段需要分两次训练
+dataset_dir: data  # 数据集目录
+dataset: code_main
+template: qwen3
+cutoff_len: 4096                 # seq_len: 4096
+max_samples: 10000
+preprocessing_num_workers: 8
+dataloader_num_workers: 4
+
+# 数据集权重 (主训练阶段 5000 步 + 退火阶段 600 步)
+# 主阶段 (前5000步): cpt_main 权重 1.0
+# 退火阶段 (后600步): cpt_anneal 权重 1.0
+
+### output
+output_dir: saves/qwen2.5-7b/full/cpt
+logging_steps: 10
+save_steps: 2000                  # 每2000步才保存一次（减少checkpoint频率）
+save_total_limit: 1              # 只保留1个最新checkpoint
+save_strategy: steps             # 按步数保存
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false           # 保存完整模型权重（确保最终模型可用）
+report_to: none
+
+### train
+per_device_train_batch_size: 4   # micro_batch: 4
+gradient_accumulation_steps: 32  # effective ~0.5M tokens/step
+learning_rate: 3.0e-5            # lr: 3e-5
+num_train_epochs: 1
+max_steps: 1000                  # 训练步数
+lr_scheduler_type: cosine
+warmup_ratio: 0.05               # warmup_ratio: 0.05
+# 注意：LlamaFactory 使用 lr_scheduler_type: cosine 时会自动应用 min_lr
+# 但标准配置不支持单独设置 min_lr，如需退火请使用命令行参数覆盖
+bf16: true                       # precision: bf16
+fp16: false
+# optimizer 参数不需要在配置中指定，默认使用 adamw
+adam_beta1: 0.9
+adam_beta2: 0.95
+adam_epsilon: 1.0e-8
+max_grad_norm: 1.0                # grad_clip: 1.0
+weight_decay: 0.1                # weight_decay: 0.1
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+### eval (CPT不需要eval)
+# eval_dataset: null
+# val_size: 0.0

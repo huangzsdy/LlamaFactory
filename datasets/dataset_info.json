@@ -1,0 +1,18 @@
+{
+  "code_main": {
+    "file_name": "c4_demo.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "CPT 主训练阶段数据"
+  },
+  "code_anneal": {
+    "file_name": "c4_demo.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "CPT 退火阶段数据"
+  }
+}

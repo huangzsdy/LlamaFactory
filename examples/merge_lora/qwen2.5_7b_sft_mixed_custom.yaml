@@ -1,0 +1,13 @@
+### 合并 LoRA 权重并导出最终模型
+
+### model
+model_name_or_path: /home/hzs/260304/models/Qwen/Qwen2.5-7B-Instruct
+adapter_name_or_path: saves/qwen2.5-7b/lora/sft_mixed_custom  # LoRA 权重路径
+template: qwen3
+finetuning_type: lora
+
+### export
+export_dir: ./merged_model/qwen2.5-7b-sft-mixed-custom  # 最终模型输出目录
+export_quantization_bit: null
+export_quantization_method: null
+export_legacy_format: false

@@ -1,0 +1,31 @@
+{
+  "general_corpus": {
+    "file_name": "train.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    }
+  },
+  "wiki_paraphrase": {
+    "file_name": "train.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "content"
+    }
+  },
+  "wikipedia": {
+    "file_name": "train.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    }
+  },
+  "qa_pairs": {
+    "file_name": "train.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "content",
+      "response": "answer"
+    }
+  }
+}
