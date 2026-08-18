@@ -1124,14 +1124,12 @@ def main():
             'correct': correct,
             'total': total,
             'accuracy': accuracy,
-            'details': details
         }
         
         print(f"\n结果: {correct}/{total} = {accuracy:.2f}%")
         
-        os.makedirs('./outputs', exist_ok=True)
-        with open(f'./outputs/{dataset_name}_detail.json', 'w', encoding='utf-8') as f:
-            json.dump(details, f, ensure_ascii=False, indent=2)
+        # 断点续评：保存详细结果（覆盖之前的文件）
+        save_detail_results(dataset_name, details)
     
     # ============ 最终汇总 ============
     print("\n" + "="*60)
