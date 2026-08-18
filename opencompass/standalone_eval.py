@@ -725,7 +725,13 @@ def main():
             print("L2: LooGLE 风格 evidence 句子重叠 (Li et al., 2023, arXiv:2311.04939)")
             print(f"   evidence 重叠阈值: {LONGDEP_EVIDENCE_OVERLAP_THRESHOLD}")
             
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
+                if str(i) in details:
+                    continue
                 try:
                     context = item.get('context', '')
                     question = item.get('input', '')
@@ -830,7 +836,13 @@ def main():
             else:
                 print(f"  容差: 无（与官方一致）")
             
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
+                if str(i) in details:
+                    continue
                 try:
                     question = item.get('question', '')
                     answer_text = item.get('answer', '')
@@ -876,7 +888,14 @@ def main():
         # ============ 语言理解（翻译） ============
         elif dataset_name == '语言理解':
             print("使用翻译评测（基于词重叠 F1 + 召回率 + Bigram）")
+            
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
+                if str(i) in details:
+                    continue
                 try:
                     question_parts = []
                     for key, value in item.items():
@@ -916,7 +935,14 @@ def main():
         elif dataset_name == 'abuse_qa':
             print("使用风险问题评测（拒绝率检测）")
             print("参考: AdvBench / TruthfulQA 拒绝率思路")
+            
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
+                if str(i) in details:
+                    continue
                 try:
                     question = item.get('测试问题', '') or item.get('question', '')
                     
@@ -952,7 +978,14 @@ def main():
         # ============ military_mcq（军事选择题）============
         elif dataset_name == 'military_mcq':
             print("使用军事知识选择题评测（MMLU 风格）")
+            
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
+                if str(i) in details:
+                    continue
                 try:
                     question = item.get('测试问题', '') or item.get('question', '')
                     options = item.get('测试选项', '') or item.get('options', '')
@@ -991,7 +1024,14 @@ def main():
         elif dataset_name in ['逻辑推理', '知识理解', 'JS通用知识理解', 'JS通用知识']:
             print(f"使用 {dataset_name} 评测（MMLU 风格，从 target_scores 提取答案）")
             print("参考: Hendrycks et al., 2020 (arXiv:2009.03300)")
+            
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
+                if str(i) in details:
+                    continue
                 try:
                     question = item.get('question', '') or item.get('input', '')
                     
