@@ -704,8 +704,8 @@ def main():
             results[dataset_name] = {'correct': correct, 'total': len(data), 'accuracy': accuracy}
             print(f"结果: {correct}/{len(data)} = {accuracy:.2f}%")
         
-        # ============ 逻辑推理 / 知识理解 / JS通用知识理解 ============
-        elif dataset_name in ['逻辑推理', '知识理解', 'JS通用知识理解']:
+        # ============ 逻辑推理 / 知识理解 / JS通用知识 ============
+        elif dataset_name in ['逻辑推理', '知识理解', 'JS通用知识理解', 'JS通用知识']:
             print(f"使用 {dataset_name} 评测")
             
             for i, item in enumerate(tqdm(data, desc="评测")):
