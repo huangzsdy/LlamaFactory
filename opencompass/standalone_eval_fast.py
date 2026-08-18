@@ -11,6 +11,8 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 import re
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # 设置工作目录
 # os.chdir('/mnt/c/Users/ThinkPad/my_own_files/study/llm/LlamaFactory-main/LlamaFactory-main/opencompass')
@@ -106,7 +108,7 @@ def load_model():
                 )
             else:
                 model = Qwen2ForCausalLM.from_pretrained(
-                    model_path, device_map='auto', trust_remote_code=True, torch_dtype=torch.float16
+                    model_path, device_map='auto', trust_remote_code=True, torch_dtype=torch.bfloat16
                 )
             print("直接加载成功!")
             return model, tokenizer, device
@@ -131,7 +133,7 @@ def load_model():
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
-                model_path, device_map='auto', trust_remote_code=True, torch_dtype=torch.float16
+                model_path, device_map='auto', trust_remote_code=True, torch_dtype=torch.bfloat16
             )
         
         return model, tokenizer, device
@@ -342,15 +344,17 @@ def main():
         is_code_dataset = '代码' in dataset_name or 'code' in dataset_name.lower()
         
         if is_code_dataset:
-            # 代码生成评测
-            print("检测到代码生成数据集，使用代码执行评测...")
+            # 代码生成评测（优化版：先批量生成，再并行测试）
+            print("检测到代码生成数据集，使用代码执行评测（并行优化）...")
             
             # 继续使用已有的 detail 结果
             detail_results = existing_detail.copy()
             correct = sum(1 for r in detail_results.values() if is_correct_result(r))
             
-            for i, item in tqdm(enumerate(data), total=len(data), desc="评测进度"):
-                # 跳过已处理的样本
+            # 阶段1：批量生成代码
+            print("阶段1: 批量生成代码...")
+            generated_items = []
+            for i, item in tqdm(enumerate(data), total=len(data), desc="生成代码"):
                 if str(i) in detail_results:
                     continue
                 
@@ -370,28 +374,41 @@ def main():
                 else:
                     generated_code = generate_code_hf(model, tokenizer, question, max_new_tokens=512, device=device)
                 
-                # 执行测试
-                is_correct, msg = execute_code_test(generated_code, test_code)
+                generated_items.append((i, question, generated_code, test_code))
+            
+            # 阶段2：并行执行代码测试
+            if generated_items:
+                print(f"阶段2: 并行执行代码测试 ({len(generated_items)} 个任务)...")
+                n_workers = min(8, multiprocessing.cpu_count())
+                print(f"使用 {n_workers} 个进程并行评测...")
                 
-                # 保存结果
-                detail_results[str(i)] = {
-                    'question': question[:100],
-                    'generated_code': generated_code[:200] if generated_code else '',
-                    'test_code': test_code[:100] if test_code else '',
-                    'correct': is_correct,
-                    'message': msg
-                }
-                
-                if is_correct:
-                    correct += 1
-                else:
-                    # 打印前几个错误用于调试
-                    if len(detail_results) - correct <= 3:
-                        print(f"  样本 {i+1} 错误: {msg}")
-                
-                # 每处理 50 个样本保存一次
-                if (i + 1) % 50 == 0:
-                    save_detail_results(dataset_name, detail_results)
+                with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                    futures = {executor.submit(execute_code_test, code, test): idx 
+                              for idx, _, code, test in generated_items}
+                    
+                    for future in tqdm(as_completed(futures), total=len(futures), desc="代码执行"):
+                        idx = futures[future]
+                        _, question, generated_code, test_code = generated_items[[i for i, (i2, _, _, _) in enumerate(generated_items) if i2 == idx][0]]
+                        
+                        try:
+                            is_correct, msg = future.result()
+                        except Exception as e:
+                            is_correct, msg = False, f"执行异常: {str(e)[:40]}"
+                        
+                        detail_results[str(idx)] = {
+                            'question': question[:100],
+                            'generated_code': generated_code[:200] if generated_code else '',
+                            'test_code': test_code[:100] if test_code else '',
+                            'correct': is_correct,
+                            'message': msg
+                        }
+                        
+                        if is_correct:
+                            correct += 1
+                        
+                        # 每处理 50 个样本保存一次
+                        if len(detail_results) % 50 == 0:
+                            save_detail_results(dataset_name, detail_results)
             
             # 保存最终结果
             save_detail_results(dataset_name, detail_results)
