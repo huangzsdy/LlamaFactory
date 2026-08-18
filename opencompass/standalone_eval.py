@@ -704,19 +704,19 @@ def main():
                         is_corr, reason = future.result()
                         if is_corr:
                             correct += 1
-                        details.append({
+                        details[str(idx)] = {
                             'id': idx,
                             'task_id': task_json.get('task_id', ''),
                             'correct': is_corr,
                             'reason': reason
-                        })
+                        }
                     except Exception as e:
-                        details.append({
+                        details[str(idx)] = {
                             'id': idx,
                             'task_id': task_json.get('task_id', ''),
                             'correct': False,
                             'reason': f'异常: {str(e)[:50]}'
-                        })
+                        }
         
         # ============ 长程依赖 ============
         elif dataset_name == '长程依赖':
@@ -801,7 +801,7 @@ def main():
                     if is_correct:
                         correct += 1
                     
-                    details.append({
+                    details[str(i)] = {
                         'id': i,
                         'question': question[:50],
                         'full_output': full_output[:200],
@@ -812,7 +812,7 @@ def main():
                         'l2_correct': l2_correct,
                         'correct': is_correct,
                         'reason': longdep_reason
-                    })
+                    }
                     
                     if VERBOSE:
                         print(f"\n--- 样本 {i+1}/{total} ---")
@@ -862,7 +862,7 @@ def main():
                     if is_correct:
                         correct += 1
                     
-                    details.append({
+                    details[str(i)] = {
                         'id': i,
                         'question': question[:50],
                         'prediction': prediction[:80],
@@ -912,7 +912,7 @@ def main():
                     if is_correct:
                         correct += 1
                     
-                    details.append({
+                    details[str(i)] = {
                         'id': i,
                         'question': question[:50],
                         'prediction': prediction[:50],
@@ -958,7 +958,7 @@ def main():
                     if is_correct:
                         correct += 1
                     
-                    details.append({
+                    details[str(i)] = {
                         'id': i,
                         'question': question[:50],
                         'prediction': prediction[:100],
@@ -1002,7 +1002,7 @@ def main():
                     if is_correct:
                         correct += 1
                     
-                    details.append({
+                    details[str(i)] = {
                         'id': i,
                         'question': question[:50],
                         'prediction': prediction[:50],
@@ -1054,7 +1054,7 @@ def main():
                     if is_correct:
                         correct += 1
                     
-                    details.append({
+                    details[str(i)] = {
                         'id': i,
                         'question': question[:50],
                         'prediction': prediction[:50],
@@ -1100,13 +1100,13 @@ def main():
                             correct += 1
                         
                         idx = i + j
-                        details.append({
+                        details[str(idx)] = {
                             'id': idx,
                             'question': questions[j][:50],
                             'prediction': pred[:50],
                             'target': answer,
                             'correct': is_correct,
-                        })
+                        }
                         
                         if VERBOSE:
                             print(f"\n--- 样本 {idx+1}/{total} ---")
