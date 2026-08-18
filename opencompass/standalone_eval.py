@@ -666,7 +666,7 @@ def main():
         
         correct = 0
         total = len(data)
-        details = []
+        details = {}
         
         # ============ 代码生成 ============
         if dataset_name == '代码生成':
