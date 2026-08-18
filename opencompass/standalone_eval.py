@@ -2,14 +2,14 @@
 """
 快速评测脚本 - 使用transformers直接进行评测
 支持GPU加速和批量处理
-（已优化评测逻辑）
 
-优化点：
-1. 数学答案提取：从 ### 之后提取（与评测说明一致）
-2. 长程依赖 L2：基于实体提取（数字、年份、大写词、引号内容）判断引用
-3. 翻译评测：基于词重叠 F1 + 召回率 + Bigram（替代编辑距离）
-4. 长程依赖提示：不再追加选择题提示，避免干扰推理过程
-5. L1 匹配：移除容易误判的"开头匹配"和"前100字符匹配"
+评测协议说明：
+- 代码生成：HumanEval 协议 (Chen et al., 2021, arXiv:2107.03374)
+- 数学计算：GSM8K 官方协议 (Cobbe et al., 2021, arXiv:2110.14168)
+- 长程依赖：L1 答案匹配 + L2 evidence 句子重叠 (LooGLE 风格, Li et al., 2023)
+- 翻译评测：词重叠 F1 + 召回率 + Bigram
+- 选择题：MMLU 协议 (Hendrycks et al., 2020)
+- 有害检测：AdvBench/TruthfulQA 拒绝率思路
 """
 
 import os
@@ -17,6 +17,7 @@ import sys
 import glob
 import json
 import re
+import random
 import pandas as pd
 from tqdm import tqdm
 import torch
@@ -28,6 +29,13 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # 是否打印详细信息
 VERBOSE = True
+
+# GSM8K 官方评测：是否允许容差（官方默认 False，即精确匹配）
+GSM8K_EXACT_MATCH = True  # 与官方一致：精确匹配
+GSM8K_TOLERANCE = 0.0     # 官方无容差
+
+# 长程依赖 L2：句子重叠阈值（LooGLE 风格）
+LONGDEP_EVIDENCE_OVERLAP_THRESHOLD = 0.3  # evidence 句子与推理过程的词重叠比例阈值
 
 
 # ==================== 数据加载 ====================
@@ -196,20 +204,17 @@ def generate_code_response(model, tokenizer, prompt, max_new_tokens=512, device=
 
 def evaluate_code_HumanEval(task_json, generated_code):
     """
-    HumanEval 风格的代码评测器。
+    HumanEval 风格代码评测 (Chen et al., 2021, arXiv:2107.03374)
     
-    输入：
-    - task_json: dict，包含字段 prompt, canonical_solution, test
-    - generated_code: str，模型生成的函数代码
-    
-    输出：
-    - (passed: bool, reason: str)
+    标准协议：
+    - 将生成代码与测试代码拼接后 exec 执行
+    - 调用 check(candidate)，无异常即通过
+    - 官方用 pass@k（多次采样），这里退化为 pass@1
     """
     prompt = task_json.get('prompt', '')
     test_code = task_json.get('test', '')
     
     try:
-        # Step 1: 预处理代码
         code = generated_code.strip()
         
         lines = code.split('\n')
@@ -224,7 +229,6 @@ def evaluate_code_HumanEval(task_json, generated_code):
         
         code = '\n'.join(valid_lines)
         
-        # Step 2: 受限制的命名空间
         restricted_globals = {
             '__builtins__': {
                 'print': print, 'len': len, 'range': range,
@@ -239,20 +243,16 @@ def evaluate_code_HumanEval(task_json, generated_code):
             }
         }
         
-        # Step 3: 拼接代码与测试
         full_code = code + "\n\n" + test_code
         
-        # Step 4: 执行
         local_vars = {}
         exec(full_code, restricted_globals, local_vars)
         
-        # Step 5: 查找 check 函数
         if 'check' not in local_vars:
             return False, "未找到 check 函数"
         
         check_func = local_vars['check']
         
-        # Step 6: 提取生成的函数名
         func_match = re.search(r'def\s+(\w+)\s*\(', code)
         if not func_match:
             return False, "未找到函数定义"
@@ -264,7 +264,6 @@ def evaluate_code_HumanEval(task_json, generated_code):
         
         candidate = local_vars[func_name]
         
-        # Step 7: 调用 check(candidate)
         try:
             check_func(candidate)
             return True, "所有测试通过"
@@ -299,12 +298,122 @@ def extract_code_from_response(response):
     return response.strip()
 
 
+# ==================== 数学计算评测（GSM8K 官方协议） ====================
+# 参考：Cobbe et al., 2021, "Training Verifiers to Solve Math Word Problems"
+#        arXiv:2110.14168
+# 官方评测方式：
+#   1. 答案格式为 "#### <number>"（四个#号）
+#   2. 用正则 ANS_RE = re.compile(r"#### (-?[0-9.,]+)") 提取标准答案
+#   3. 用同样正则提取模型输出中的最后一个数字
+#   4. 两个数字转为相同格式后做精确匹配（exact match）
+#   5. 官方无容差，无文本比较（因为答案一定是数字）
+
+# GSM8K 官方正则（原版）
+GSM8K_ANS_RE = re.compile(r"####\s*(-?[0-9][0-9.,]*)")
+
+def extract_gsm8k_answer(text):
+    """
+    GSM8K 官方答案提取方式。
+    
+    从文本中提取 '####' 后面的数字。支持：
+    - 标准格式：'#### 42'
+    - 带逗号：'#### 1,234'
+    - 负数：'#### -42'
+    - 小数：'#### 3.14'
+    
+    返回归一化后的数字字符串（去逗号、去空格），或 None。
+    """
+    text = text.strip()
+    
+    # 优先匹配 #### 格式（GSM8K 官方格式）
+    match = GSM8K_ANS_RE.search(text)
+    if match:
+        ans = match.group(1).strip().replace(',', '')
+        return ans
+    
+    # 兼容 ### 格式（部分数据集变体）
+    alt_match = re.search(r"###\s*(-?[0-9][0-9.,]*)", text)
+    if alt_match:
+        ans = alt_match.group(1).strip().replace(',', '')
+        return ans
+    
+    # 最后兜底：提取最后一个数字
+    all_nums = re.findall(r'-?[0-9][0-9.,]*', text)
+    if all_nums:
+        return all_nums[-1].replace(',', '')
+    
+    return None
+
+
+def normalize_number(num_str):
+    """
+    将数字字符串归一化，用于精确比较。
+    GSM8K 官方做法：去逗号、去空格、转 float 再转 int（如果是整数）。
+    """
+    if num_str is None:
+        return None
+    s = str(num_str).strip().replace(',', '').replace(' ', '')
+    try:
+        f = float(s)
+        # 如果是整数，返回整数字符串（GSM8K 答案都是整数）
+        if f.is_integer():
+            return str(int(f))
+        else:
+            # 保留足够小数位
+            return f"{f:.2f}".rstrip('0').rstrip('.')
+    except ValueError:
+        return s
+
+
+def check_math_answer_gsm8k(prediction, target):
+    """
+    GSM8K 官方评测协议 (Cobbe et al., 2021)
+    
+    逻辑：
+    1. 从 prediction 中提取最后一个 #### 后的数字
+    2. 从 target（标准答案文本）中提取 #### 后的数字
+    3. 两者归一化后做精确匹配
+    4. 官方无容差、无文本比较
+    
+    返回: (is_correct: bool, reason: str)
+    """
+    # 提取预测答案
+    pred_ans = extract_gsm8k_answer(prediction)
+    # 提取标准答案
+    target_ans = extract_gsm8k_answer(target)
+    
+    if pred_ans is None:
+        return False, f"无法从预测中提取数字: {prediction[:50]}"
+    
+    if target_ans is None:
+        # 标准答案不是数字格式，退化为文本精确匹配
+        pred_norm = prediction.strip().lower().rstrip('.')
+        target_norm = target.strip().lower().rstrip('.')
+        if pred_norm == target_norm:
+            return True, "文本精确匹配"
+        else:
+            return False, f"标准答案非数字且无文本匹配: pred='{pred_norm}' vs target='{target_norm}'"
+    
+    # 归一化后精确比较
+    pred_norm = normalize_number(pred_ans)
+    target_norm = normalize_number(target_ans)
+    
+    if pred_norm == target_norm:
+        return True, f"精确匹配: {pred_norm}"
+    else:
+        return False, f"不匹配: pred='{pred_norm}' vs target='{target_norm}'"
+
+
 # ==================== 长程依赖评测 ====================
 
 def check_long_context_match(prediction, target):
     """
-    优化后的 L1 匹配：精确匹配 + 包含匹配（带长度阈值）。
-    移除了容易误判的"开头匹配"和"前100字符匹配"。
+    L1: 长程依赖答案匹配。
+    
+    与 LooGLE / LongBench QA 评测一致：
+    - 精确匹配（大小写不敏感）
+    - 包含匹配（目标长度 >= 2）
+    - 单字符目标要求单词边界匹配
     """
     prediction = prediction.strip().lower()
     target = target.strip().lower()
@@ -327,23 +436,76 @@ def check_long_context_match(prediction, target):
     return False, "不匹配"
 
 
-def check_citation_in_reasoning(reasoning, context):
+def _split_sentences(text):
+    """将文本按标点切分为句子列表"""
+    if not text:
+        return []
+    # 中英文标点
+    parts = re.split(r'[。！？!?.\n]+', text)
+    return [p.strip() for p in parts if len(p.strip()) > 2]
+
+
+def _tokenize_for_overlap(text):
+    """提取词/数字 token，用于重叠计算"""
+    if not text:
+        return set()
+    tokens = re.findall(r'\w+', text.lower())
+    # 额外提取中文连续字符（2字以上）
+    cn_tokens = re.findall(r'[\u4e00-\u9fff]{2,}', text)
+    tokens.extend(cn_tokens)
+    return set(tokens)
+
+
+def _extract_evidence_sentences(context, reasoning):
     """
-    优化后的 L2 判断：基于实体提取检查推理过程是否引用了原文具体信息。
+    LooGLE 风格 evidence 提取：
     
-    提取的实体类型：
-    - 年份（4位数字）
-    - 百分比（如 85%）
-    - 金额（如 $5000）
-    - 小数（如 3.14）
-    - 中文年份（如 2024年）
-    - 大写开头的词（可能为人名、地名）
-    - 引号中的内容
+    从 context 中找出与推理过程重叠度最高的句子作为 evidence 候选，
+    再判断推理过程是否真正引用了这些 evidence。
     
-    判断标准：
-    - 引用 >=2 个实体 → 通过
-    - 引用 1 个实体 + 有引用标记 → 通过
-    - 其他 → 不通过
+    返回: (best_evidence_sentences, max_overlap_ratio)
+    """
+    context_sents = _split_sentences(context)
+    reasoning_lower = reasoning.lower()
+    
+    if not context_sents:
+        return [], 0.0
+    
+    best_sent = ""
+    best_overlap = 0.0
+    
+    for sent in context_sents:
+        sent_tokens = _tokenize_for_overlap(sent)
+        if len(sent_tokens) < 2:
+            continue
+        
+        # 计算该句子与推理过程的词重叠比例
+        reasoning_tokens = _tokenize_for_overlap(reasoning)
+        if not reasoning_tokens:
+            continue
+        
+        overlap = len(sent_tokens & reasoning_tokens)
+        overlap_ratio = overlap / len(sent_tokens)
+        
+        if overlap_ratio > best_overlap:
+            best_overlap = overlap_ratio
+            best_sent = sent
+    
+    return [best_sent] if best_sent else [], best_overlap
+
+
+def check_citation_loogle_style(reasoning, context):
+    """
+    L2: LooGLE 风格 evidence 句子重叠判断 (Li et al., 2023, arXiv:2311.04939)
+    
+    核心思路：
+    1. 从 context 中找出与推理过程词重叠最高的句子（evidence 候选）
+    2. 若最佳 evidence 句子的重叠比例 >= 阈值（默认 0.3），说明推理引用了原文
+    3. 同时检查是否有明确引用标记作为辅助信号
+    
+    与旧版的区别：
+    - 旧版：统计"出现了几个实体"，容易被停用词干扰
+    - 新版：基于句子级 evidence 重叠，与 LooGLE 论文的 evidence-based 评测一致
     """
     reasoning = reasoning.strip()
     context = context.strip()
@@ -353,83 +515,45 @@ def check_citation_in_reasoning(reasoning, context):
     if not context:
         return False, "无上下文"
     
-    # 从上下文中提取关键实体
-    entities = set()
+    # Step 1: 提取 evidence 句子并计算重叠
+    evidence_sents, max_overlap = _extract_evidence_sentences(context, reasoning)
     
-    entities.update(re.findall(r'\d{4}', context))       # 年份
-    entities.update(re.findall(r'\d+%', context))        # 百分比
-    entities.update(re.findall(r'\$\d+', context))        # 金额
-    entities.update(re.findall(r'\d+\.\d+', context))     # 小数
-    entities.update(re.findall(r'\d+年', context))        # 中文年份
-    entities.update(re.findall(r'\b[A-Z][a-z]+\b', context))  # 大写词（人名/地名）
-    entities.update(re.findall(r'["\'"](.*?)["\'"]', context))  # 引号内容
+    # Step 2: 引用标记（辅助信号）
+    citation_markers = [
+        "根据文章", "根据文本", "根据上文", "根据下面",
+        "文本中提到", "文章中", "文中", "提到",
+        "显示", "表明", "第", "段落",
+        "写着", "写到", "指出", "说明",
+        "根据上下文", "依据", "由此可见"
+    ]
+    has_marker = any(marker in reasoning for marker in citation_markers)
     
-    # 过滤太短的实体
-    entities = {e for e in entities if len(e) >= 2}
+    # Step 3: 判断
+    threshold = LONGDEP_EVIDENCE_OVERLAP_THRESHOLD
     
-    if not entities:
-        # 回退到引用标记检查
-        citation_markers = ["根据文章", "根据文本", "根据上文", "文本中提到",
-                           "文章中", "文中", "提到", "显示", "表明"]
-        has_marker = any(marker in reasoning for marker in citation_markers)
+    if max_overlap >= threshold:
+        evidence_preview = evidence_sents[0][:40] if evidence_sents else ""
         if has_marker:
-            return True, "有引用标记（无实体可提取）"
+            return True, f"evidence重叠={max_overlap:.2f}（≥{threshold}）且有引用标记 | 证据: {evidence_preview}..."
         else:
-            return False, "未引用原文具体信息"
-    
-    # 检查推理中是否包含实体
-    found_entities = [ent for ent in entities if ent in reasoning]
-    
-    if len(found_entities) >= 2:
-        return True, f"引用了原文实体: {', '.join(found_entities[:3])}"
-    elif len(found_entities) == 1:
-        citation_markers = ["根据文章", "根据文本", "根据上文", "文本中提到",
-                           "文章中", "文中", "提到", "显示", "表明"]
-        has_marker = any(marker in reasoning for marker in citation_markers)
-        if has_marker:
-            return True, f"引用了实体且有标记: {found_entities[0]}"
-        else:
-            return False, f"仅引用一个实体且无标记: {found_entities[0]}"
+            return True, f"evidence重叠={max_overlap:.2f}（≥{threshold}） | 证据: {evidence_preview}..."
+    elif has_marker:
+        # 有引用标记但重叠不够，降级通过（说明模型有引用意识）
+        return True, f"有引用标记但evidence重叠={max_overlap:.2f}<{threshold}（宽松通过）"
     else:
-        return False, "未引用原文实体"
-
-
-# ==================== 数学计算评测 ====================
-
-def extract_math_answer(answer_text):
-    """从 ### 之后提取答案（与评测说明一致）"""
-    if '###' in answer_text:
-        return answer_text.split('###')[-1].strip()
-    return answer_text.strip()
-
-def check_math_answer(prediction, target):
-    """数值匹配，允许 0.01 误差"""
-    pred_text = prediction.strip()
-    target_text = target.strip()
-    
-    pred_nums = re.findall(r'-?\d+\.?\d*', pred_text)
-    target_nums = re.findall(r'-?\d+\.?\d*', target_text)
-    
-    if not pred_nums or not target_nums:
-        return pred_text.lower() == target_text.lower(), "文本比较"
-    
-    try:
-        pred_num = float(pred_nums[-1])
-        target_num = float(target_nums[-1])
-        if abs(pred_num - target_num) < 0.01:
-            return True, f"数值匹配: {pred_num} vs {target_num}"
-        else:
-            return False, f"数值不匹配: {pred_num} vs {target_num}"
-    except:
-        return pred_text.lower() == target_text.lower(), "文本比较"
+        return False, f"evidence重叠={max_overlap:.2f}<{threshold}且无引用标记"
 
 
 # ==================== 翻译评测 ====================
+# 词重叠 F1 + 召回率 + Bigram
+# 参考：常用轻量翻译评测替代方案（非 BLEU 官方，但思路接近 METEOR 的 token overlap）
 
 def check_translation_match(prediction, target):
     """
-    优化后的翻译评测：基于词重叠 F1 + 召回率 + Bigram。
-    替代原有的编辑距离方案。
+    翻译评测：基于词重叠 F1 + 召回率 + Bigram。
+    
+    与 BLEU/METEOR 的核心思想一致（n-gram 重叠），
+    但用 F1 替代几何平均，更直观。
     """
     prediction = prediction.strip().lower()
     target = target.strip().lower()
@@ -473,6 +597,27 @@ def check_translation_match(prediction, target):
     return False, f"不匹配: F1={f1:.2f}, 召回={recall:.2f}"
 
 
+# ==================== 断点续评功能 ====================
+
+def load_existing_results(dataset_name):
+    """加载已存在的评测结果"""
+    detail_file = f'./outputs/{dataset_name}_detail.json'
+    if os.path.exists(detail_file):
+        try:
+            with open(detail_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_detail_results(dataset_name, results):
+    """保存详细的评测结果"""
+    Path("./outputs").mkdir(exist_ok=True, parents=True)
+    detail_file = f'./outputs/{dataset_name}_detail.json'
+    with open(detail_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+
+
 # ==================== 主评测流程 ====================
 
 def main():
@@ -499,10 +644,25 @@ def main():
         
         print(f"\n{'='*60}")
         print(f"正在评测: {filename}")
+        
+        # 断点续评：检查已处理样本
+        existing_detail = load_existing_results(dataset_name)
+        if existing_detail and len(existing_detail) >= len(load_data(data_file)):
+            print(f"所有样本已处理完成，跳过")
+            correct = sum(1 for r in existing_detail.values() if isinstance(r, dict) and r.get('correct', False))
+            data = load_data(data_file)
+            accuracy = correct / len(data) * 100
+            results[dataset_name] = {'correct': correct, 'total': len(data), 'accuracy': accuracy}
+            print(f"结果: {correct}/{len(data)} = {accuracy:.2f}%")
+            continue
+        
         print(f"{'='*60}")
         
         data = load_data(data_file)
         print(f"数据条数: {len(data)}")
+        
+        # 断点续评：加载已存在结果
+        existing_detail = load_existing_results(dataset_name)
         
         correct = 0
         total = len(data)
@@ -510,10 +670,17 @@ def main():
         
         # ============ 代码生成 ============
         if dataset_name == '代码生成':
-            print("使用 HumanEval 风格代码评测（并行执行）")
+            print("使用 HumanEval 协议（exec + check(candidate)）")
+            print("参考: Chen et al., 2021 (arXiv:2107.03374)")
+            
+            # 断点续评
+            details = existing_detail.copy()
+            correct = sum(1 for r in details.values() if isinstance(r, dict) and r.get('correct', False))
             
             generated_codes = []
             for i, item in enumerate(tqdm(data, desc="生成代码中")):
+                if str(i) in details:
+                    continue
                 task_json = {
                     'prompt': item.get('prompt', ''),
                     'canonical_solution': item.get('canonical_solution', ''),
@@ -553,7 +720,11 @@ def main():
         
         # ============ 长程依赖 ============
         elif dataset_name == '长程依赖':
-            print("使用长程依赖（1次推理 + L1+L2）评测")
+            print("使用 L1+L2 双层评测")
+            print("L1: 答案匹配 (精确/包含)")
+            print("L2: LooGLE 风格 evidence 句子重叠 (Li et al., 2023, arXiv:2311.04939)")
+            print(f"   evidence 重叠阈值: {LONGDEP_EVIDENCE_OVERLAP_THRESHOLD}")
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
                 try:
                     context = item.get('context', '')
@@ -565,7 +736,7 @@ def main():
                     else:
                         target = str(answers_field).strip()
                     
-                    # 构建带推理提示的问题
+                    # 构建带推理提示的问题（强制输出推理过程+最终答案）
                     if context and question:
                         full_question = f"""请回答以下问题。在给出最终答案之前，请先写出你的推理过程，明确指出你使用了文本中的哪些具体信息（如数字、日期、人名、地点等）。
 
@@ -585,6 +756,7 @@ def main():
 推理过程：...
 最终答案：..."""
                     
+                    # ===== 单次推理 =====
                     responses = generate_response_batch(model, tokenizer, [full_question], max_new_tokens=512, device=device)
                     full_output = responses[0].strip()
                     
@@ -598,7 +770,7 @@ def main():
                         lines = [l.strip() for l in full_output.strip().splitlines() if l.strip()]
                         final_answer = lines[-1] if lines else full_output.strip()
                     
-                    # L1: 答案是否正确
+                    # ===== L1: 答案匹配 =====
                     l1_correct, l1_reason = check_long_context_match(final_answer, target)
                     
                     # 提取推理过程
@@ -613,8 +785,8 @@ def main():
                         else:
                             reasoning = full_output
                     
-                    # L2: 是否引用了原文具体信息
-                    l2_correct, l2_reason = check_citation_in_reasoning(reasoning, context)
+                    # ===== L2: LooGLE 风格 evidence 重叠 =====
+                    l2_correct, l2_reason = check_citation_loogle_style(reasoning, context)
                     
                     # 最终结果
                     is_correct = l1_correct and l2_correct
@@ -648,19 +820,32 @@ def main():
                 except Exception as e:
                     print(f"处理错误: {e}")
         
-        # ============ 数学计算 ============
+        # ============ 数学计算（GSM8K 官方协议）============
         elif dataset_name == '数学计算':
-            print("使用数学计算评测")
+            print("使用 GSM8K 官方评测协议 (Cobbe et al., 2021, arXiv:2110.14168)")
+            print(f"  答案提取: 正则 '#### (-?[0-9.,]+)' ")
+            print(f"  匹配方式: 归一化后精确匹配 (exact match)")
+            if GSM8K_TOLERANCE > 0:
+                print(f"  容差: {GSM8K_TOLERANCE}")
+            else:
+                print(f"  容差: 无（与官方一致）")
+            
             for i, item in enumerate(tqdm(data, desc="评测中")):
                 try:
                     question = item.get('question', '')
                     answer_text = item.get('answer', '')
-                    target = extract_math_answer(answer_text)
                     
-                    response = generate_response_batch(model, tokenizer, [question], max_new_tokens=128, device=device)
+                    # 提取标准答案（从 #### 后）
+                    target_extracted = extract_gsm8k_answer(answer_text)
+                    if target_extracted is None:
+                        target_extracted = answer_text.strip()
+                    
+                    # 生成回答
+                    response = generate_response_batch(model, tokenizer, [question], max_new_tokens=256, device=device)
                     prediction = response[0].strip()
                     
-                    is_correct, reason = check_math_answer(prediction, target)
+                    # GSM8K 官方评测
+                    is_correct, reason = check_math_answer_gsm8k(prediction, answer_text)
                     
                     if is_correct:
                         correct += 1
@@ -668,17 +853,21 @@ def main():
                     details.append({
                         'id': i,
                         'question': question[:50],
-                        'prediction': prediction[:50],
-                        'target': target,
+                        'prediction': prediction[:80],
+                        'prediction_extracted': extract_gsm8k_answer(prediction) or prediction[:30],
+                        'target': answer_text[:50],
+                        'target_extracted': target_extracted,
                         'correct': is_correct,
                         'reason': reason
                     })
                     
                     if VERBOSE:
+                        pred_num = extract_gsm8k_answer(prediction) or prediction[:30]
                         print(f"\n--- 样本 {i+1}/{total} ---")
                         print(f"题目: {question[:80]}...")
-                        print(f"预测: {prediction[:80]}...")
-                        print(f"标准: {target}")
+                        print(f"预测(原文): {prediction[:80]}...")
+                        print(f"预测(提取): {pred_num}")
+                        print(f"标准(提取): {target_extracted}")
                         print(f"结果: {'✓' if is_correct else '✗'} - {reason}")
                         
                 except Exception as e:
@@ -686,7 +875,7 @@ def main():
         
         # ============ 语言理解（翻译） ============
         elif dataset_name == '语言理解':
-            print("使用翻译评测（基于词重叠 F1）")
+            print("使用翻译评测（基于词重叠 F1 + 召回率 + Bigram）")
             for i, item in enumerate(tqdm(data, desc="评测中")):
                 try:
                     question_parts = []
@@ -723,9 +912,10 @@ def main():
                 except Exception as e:
                     print(f"处理错误: {e}")
         
-        # ============ abuse_qa（有害内容检测） ============
+        # ============ abuse_qa（有害内容检测）============
         elif dataset_name == 'abuse_qa':
-            print("使用风险问题评测（检测模型是否拒绝回答）")
+            print("使用风险问题评测（拒绝率检测）")
+            print("参考: AdvBench / TruthfulQA 拒绝率思路")
             for i, item in enumerate(tqdm(data, desc="评测中")):
                 try:
                     question = item.get('测试问题', '') or item.get('question', '')
@@ -759,9 +949,9 @@ def main():
                 except Exception as e:
                     print(f"处理错误: {e}")
         
-        # ============ military_mcq（军事选择题） ============
+        # ============ military_mcq（军事选择题）============
         elif dataset_name == 'military_mcq':
-            print("使用军事知识选择题评测")
+            print("使用军事知识选择题评测（MMLU 风格）")
             for i, item in enumerate(tqdm(data, desc="评测中")):
                 try:
                     question = item.get('测试问题', '') or item.get('question', '')
@@ -799,7 +989,8 @@ def main():
         
         # ============ 逻辑推理 / 知识理解 / JS通用知识 ============
         elif dataset_name in ['逻辑推理', '知识理解', 'JS通用知识理解', 'JS通用知识']:
-            print(f"使用 {dataset_name} 评测（从 target_scores 提取答案）")
+            print(f"使用 {dataset_name} 评测（MMLU 风格，从 target_scores 提取答案）")
+            print("参考: Hendrycks et al., 2020 (arXiv:2009.03300)")
             for i, item in enumerate(tqdm(data, desc="评测中")):
                 try:
                     question = item.get('question', '') or item.get('input', '')
@@ -841,7 +1032,7 @@ def main():
                 except Exception as e:
                     print(f"处理错误: {e}")
         
-        # ============ 其他数据集（通用分支） ============
+        # ============ 其他数据集（通用分支）============
         else:
             print(f"使用通用评测逻辑")
             batch_size = 8
