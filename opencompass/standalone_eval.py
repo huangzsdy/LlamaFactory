@@ -12,6 +12,8 @@ import pandas as pd
 from tqdm import tqdm
 import torch
 import re
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # 设置工作目录
 os.chdir('/mnt/c/Users/ThinkPad/my_own_files/study/llm/LlamaFactory-main/LlamaFactory-main/opencompass')
@@ -63,7 +65,7 @@ def load_model():
             model_path,
             device_map='auto',
             trust_remote_code=True,
-            torch_dtype=torch.float16
+            torch_dtype=torch.bfloat16  # 使用 bf16 加速
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
@@ -511,52 +513,51 @@ def main():
         details = []
         
         if dataset_name == '代码生成':
-            print("使用 HumanEval 风格代码评测")
-            for i, item in enumerate(tqdm(data, desc="评测中")):
-                try:
-                    # 构建任务 JSON
-                    task_json = {
-                        'prompt': item.get('prompt', ''),
-                        'canonical_solution': item.get('canonical_solution', ''),
-                        'test': item.get('test', ''),
-                        'entry_point': item.get('entry_point', ''),
-                        'task_id': item.get('task_id', '')
-                    }
-                    
-                    # 生成代码
-                    response = generate_code_response(model, tokenizer, task_json['prompt'], max_new_tokens=512, device=device)
-                    
-                    # 使用 HumanEval 风格评测器
-                    is_correct, reason = evaluate_code_HumanEval(task_json, response)
-                    
-                    if is_correct:
-                        correct += 1
-                    
-                    details.append({
-                        'id': i,
-                        'task_id': task_json.get('task_id', ''),
-                        'prompt': task_json['prompt'][:50],
-                        'generated_code': response[:100],
-                        'correct': is_correct,
-                        'reason': reason
-                    })
-                    
-                    # 打印详细信息
-                    if VERBOSE:
-                        print(f"\n--- 样本 {i+1}/{total} [{task_json.get('task_id', '')}] ---")
-                        print(f"题目: {task_json['prompt'][:80]}...")
-                        print(f"生成代码: {response[:100]}...")
-                        print(f"结果: {'✓ 正确' if is_correct else '✗ 错误'} - {reason}")
-                        
-                except Exception as e:
-                    print(f"处理错误: {e}")
-                    details.append({
-                        'id': i,
-                        'prompt': item.get('prompt', '')[:50],
-                        'error': str(e)[:50],
-                        'correct': False,
-                        'reason': '异常'
-                    })
+            print("使用 HumanEval 风格代码评测（并行执行）")
+            
+            # 第一步：批量生成代码
+            print("阶段1: 批量生成代码...")
+            generated_codes = []
+            for i, item in enumerate(tqdm(data, desc="生成代码中")):
+                task_json = {
+                    'prompt': item.get('prompt', ''),
+                    'canonical_solution': item.get('canonical_solution', ''),
+                    'test': item.get('test', ''),
+                    'entry_point': item.get('entry_point', ''),
+                    'task_id': item.get('task_id', '')
+                }
+                response = generate_code_response(model, tokenizer, task_json['prompt'], max_new_tokens=512, device=device)
+                generated_codes.append((i, task_json, response))
+            
+            # 第二步：并行执行代码测试
+            print("阶段2: 并行执行代码测试...")
+            n_workers = min(8, multiprocessing.cpu_count())
+            print(f"使用 {n_workers} 个进程并行评测...")
+            
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(evaluate_code_HumanEval, task_json, response): (i, task_json) 
+                           for i, task_json, response in generated_codes}
+                
+                for future in tqdm(as_completed(futures), total=len(futures), desc="代码执行中"):
+                    idx, task_json = futures[future]
+                    try:
+                        is_correct, reason = future.result()
+                        if is_correct:
+                            correct += 1
+                        details.append({
+                            'id': idx,
+                            'task_id': task_json.get('task_id', ''),
+                            'correct': is_correct,
+                            'reason': reason
+                        })
+                    except Exception as e:
+                        details.append({
+                            'id': idx,
+                            'task_id': task_json.get('task_id', ''),
+                            'error': str(e)[:50],
+                            'correct': False,
+                            'reason': '异常'
+                        })
         
         elif dataset_name == '长程依赖':
             print("使用长程依赖（1次推理 + L2引用判断）评测")
