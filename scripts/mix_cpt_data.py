@@ -78,7 +78,13 @@ def mix_data(
     max_samples: int = None,
     seed: int = 42
 ):
-    """混合两个数据集"""
+    """混合两个数据集
+    
+    修复说明：
+    - 当没有设置 max_samples 时，以领域数据为基准
+    - 根据用户设置的比例，计算需要采样的通用语料数量
+    - 确保最终混合比例符合用户设置的比例
+    """
     random.seed(seed)
     
     # 计算目标数量
@@ -86,10 +92,12 @@ def mix_data(
         target_domain = int(max_samples * domain_ratio)
         target_fineweb = int(max_samples * fineweb_ratio)
     else:
-        # 如果没有设置最大样本数，则按比例采样
-        total = len(domain_data) + len(fineweb_data)
-        target_domain = int(total * domain_ratio)
-        target_fineweb = int(total * fineweb_ratio)
+        # 修复：以领域数据为基准，根据比例计算需要的通用语料数量
+        # 例如：领域数据 1000 条，设置 domain:corpus = 0.6:0.4
+        # 则通用语料应该采样 1000 * (0.4/0.6) = 667 条
+        # 这样最终混合后比例就是 60%:40%
+        target_domain = len(domain_data)  # 使用全部领域数据
+        target_fineweb = int(len(domain_data) * (fineweb_ratio / domain_ratio)) if domain_ratio > 0 else 0
     
     print(f"\nData mixing summary:")
     print(f"  Domain data: {len(domain_data)} -> sampling {min(target_domain, len(domain_data))}")
