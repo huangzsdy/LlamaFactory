@@ -1,16 +1,34 @@
-# 主训练阶段数据 (text 65% / wiki 15% / qa_ctx 17% / pure_qa 3%)
-python scripts/convert_cpt_data.py \
-    --input your_raw_data.jsonl \
-    --output data/cpt_dataset/cpt_main.jsonl \
-    --ratio-a 0.65 --ratio-b 0.15 --ratio-c 0.17 --ratio-d 0.03
+# # ========================================
+# # 数据混合方案：领域数据 + Fineweb
+# # ========================================
+# # 混合比例: 60% 领域数据 + 40% Fineweb (有效防止灾难性遗忘)
 
-# 退火阶段数据 (text 50% / wiki 25% / qa_ctx 25%)
-python scripts/convert_cpt_data.py \
-    --input your_raw_data.jsonl \
-    --output data/cpt_dataset/cpt_anneal.jsonl \
-    --ratio-a 0.50 --ratio-b 0.25 --ratio-c 0.25 --ratio-d 0.00
+# # 使用mix_cpt_data.py脚本混合数据
+# python scripts/mix_cpt_data.py \
+#     --domain-data data/cpt_dataset/your_domain_data.jsonl \
+#     --fineweb-data data/cpt_dataset/fineweb_processed.jsonl \
+#     --output data/cpt_dataset/cpt_main.jsonl \
+#     --domain-ratio 0.6 \
+#     --fineweb-ratio 0.4
+
+# # 可选：限制最大样本数
+# # python scripts/mix_cpt_data.py \
+# #     --domain-data data/cpt_dataset/your_domain_data.jsonl \
+# #     --fineweb-data data/cpt_dataset/fineweb_processed.jsonl \
+# #     --output data/cpt_dataset/cpt_main.jsonl \
+# #     --domain-ratio 0.6 \
+# #     --fineweb-ratio 0.4 \
+# #     --max-samples 100000
+
+# # 退火阶段可以提高新领域数据比例 (70% 领域 + 30% Fineweb)
+# # python scripts/mix_cpt_data.py \
+# #     --domain-data data/cpt_dataset/your_domain_data.jsonl \
+# #     --fineweb-data data/cpt_dataset/fineweb_processed.jsonl \
+# #     --output data/cpt_dataset/cpt_anneal.jsonl \
+# #     --domain-ratio 0.7 \
+# #     --fineweb-ratio 0.3
 
 
-llamafactory-cli train examples/train_full/qwen2.5_7b_full_cpt.yaml
+# llamafactory-cli train examples/train_full/qwen2.5_7b_full_cpt.yaml
 
 

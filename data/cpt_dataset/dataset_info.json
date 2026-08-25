@@ -5,7 +5,7 @@
     "columns": {
       "prompt": "text"
     },
-    "description": "CPT 主训练阶段数据 (text 65% / wiki 15% / qa_ctx 17% / pure_qa 3%)"
+    "description": "CPT 主训练阶段数据 (text 60% / wiki 25% / qa_ctx 10% / pure_qa 5%) - 60%新数据+极低学习率防遗忘"
   },
   "cpt_anneal": {
     "file_name": "cpt_anneal.jsonl",
@@ -13,6 +13,78 @@
     "columns": {
       "prompt": "text"
     },
-    "description": "CPT 退火阶段数据 (text 50% / wiki 25% / qa_ctx 25%)"
+    "description": "CPT 退火阶段数据 (text 55% / wiki 20% / qa_ctx 25%) - 退火阶段可增加QA比例"
+  },
+  "batch1_context": {
+    "file_name": "batch1_context.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "批次1：原文context 60% + Fineweb 40% - 少量step快速训练"
+  },
+  "batch2_wiki": {
+    "file_name": "batch2_wiki.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "批次2：Wiki改写 60% + Fineweb 40% - 少量step快速训练"
+  },
+  "batch3_qa": {
+    "file_name": "batch3_qa.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "批次3：QA问答 60% + Fineweb 40% - 少量step快速训练"
+  },
+  "batch_text": {
+    "file_name": "batch_text.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "从同文件提取text字段 + Fineweb混合"
+  },
+  "batch_synthesized_QA": {
+    "file_name": "batch_synthesized_QA.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "从同文件提取synthesized_QA字段 + Fineweb混合"
+  },
+  "batch_synthesized_Wikipedia-style_rephrasing": {
+    "file_name": "batch_synthesized_Wikipedia-style_rephrasing.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "从同文件提取Wiki改写字段 + Fineweb混合"
+  },
+  "anneal_text": {
+    "file_name": "anneal_text.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "退火数据：原文70% + 语料30%"
+  },
+  "anneal_synthesized_QA": {
+    "file_name": "anneal_synthesized_QA.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "退火数据：QA70% + 语料30%"
+  },
+  "anneal_synthesized_Wikipedia-style_rephrasing": {
+    "file_name": "anneal_synthesized_Wikipedia-style_rephrasing.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "text"
+    },
+    "description": "退火数据：Wiki改写70% + 语料30%"
   }
 }

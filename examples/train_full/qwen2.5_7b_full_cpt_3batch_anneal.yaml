@@ -1,0 +1,55 @@
+### model
+model_name_or_path: /home/hzs/260304/models/Qwen/Qwen2.5-7B-Instruct
+trust_remote_code: true
+
+### method
+stage: pt                         # PT (预训练/继续预训练)
+do_train: true
+finetuning_type: full             # 全参数训练
+deepspeed: examples/deepspeed/ds_z3_config.json
+
+### dataset
+# 退火训练数据集 - 需要先用mix脚本生成anneal数据
+# 退火数据比例: 70%领域 + 30%语料 (可调整)
+dataset_dir: data/cpt_dataset/anneal
+dataset: anneal_text               # 修改这里指定退火数据集: anneal_text / anneal_synthesized_QA / anneal_synthesized_Wikipedia-style_rephrasing
+template: qwen3
+cutoff_len: 2048
+max_samples: 10000
+preprocessing_num_workers: 8
+dataloader_num_workers: 4
+
+### output
+output_dir: saves/qwen2.5-7b/full/cpt_batch1_text_anneal  # 修改为对应的退火输出目录
+logging_steps: 10
+save_steps: 50                   # 退火阶段每50步保存
+save_total_limit: 2
+save_strategy: steps
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: none
+
+### train
+disable_gradient_checkpointing: false
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 64
+learning_rate: 5.0e-7            # 退火学习率：主训练的1/10
+num_train_epochs: 1
+max_steps: 100                   # 退火步数：100步
+lr_scheduler_type: cosine
+warmup_ratio: 0.05              # 退火阶段warmup可以更小
+bf16: true
+fp16: false
+adam_beta1: 0.9
+adam_beta2: 0.95
+adam_epsilon: 1.0e-8
+max_grad_norm: 1.0
+weight_decay: 0.1
+ddp_timeout: 180000000
+# 退火训练时从主训练checkpoint继续
+# resume_from_checkpoint: saves/qwen2.5-7b/full/cpt_batch1_text/checkpoint-150
+
+### eval
+# eval_dataset: null
+# val_size: 0.0

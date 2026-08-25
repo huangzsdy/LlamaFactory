@@ -1,0 +1,56 @@
+### model
+model_name_or_path: /home/hzs/260304/models/Qwen/Qwen2.5-7B-Instruct
+trust_remote_code: true
+
+### method
+stage: pt                         # PT (预训练/继续预训练)
+do_train: true
+finetuning_type: full             # 全参数训练
+deepspeed: examples/deepspeed/ds_z3_config.json
+
+### dataset
+# 三批训练分别使用不同的数据集
+# batch1: 原文context + Fineweb
+# batch2: Wiki改写 + Fineweb
+# batch3: QA问答 + Fineweb
+dataset_dir: data/cpt_dataset/main
+dataset: batch_text               # 修改这里：batch_text / batch_synthesized_QA / batch_synthesized_Wikipedia-style_rephrasing
+template: qwen3
+cutoff_len: 2048
+max_samples: 10000
+preprocessing_num_workers: 8
+dataloader_num_workers: 4
+
+### output
+output_dir: saves/qwen2.5-7b/full/cpt_3batch
+logging_steps: 10
+save_steps: 100                  # 每100步保存一次
+save_total_limit: 2              # 保留2个checkpoint
+save_strategy: steps
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: none
+
+### train
+disable_gradient_checkpointing: false
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 64
+learning_rate: 5.0e-6            # 极低学习率防止遗忘
+num_train_epochs: 1
+max_steps: 150                  # 少量step快速验证 (可调整为100-200)
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+fp16: false
+adam_beta1: 0.9
+adam_beta2: 0.95
+adam_epsilon: 1.0e-8
+max_grad_norm: 1.0
+weight_decay: 0.1
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+### eval
+# eval_dataset: null
+# val_size: 0.0

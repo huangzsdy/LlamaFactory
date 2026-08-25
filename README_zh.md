@@ -722,6 +722,45 @@ python run.py --datasets custom_mcq_gen \
 
 更多自定义数据集评测方法，请参考 [OpenCompass 自定义数据集文档](opencompass/docs/zh_cn/advanced_guides/custom_dataset.md)。
 
+### CPT 三批训练（推荐入口）
+
+本项目提供了 CPT（持续预训练）三批训练 + 退火的完整流程脚本，是本项目的**主要函数入口**。
+
+#### 脚本功能
+
+[`train_cpt_3batch.sh`](train_cpt_3batch.sh) 脚本实现以下功能：
+
+- **三GPU并行训练**：同时在3个GPU上运行不同的数据批次
+  - Batch 1: 原文训练
+  - Batch 2: QA问答训练
+  - Batch 3: Wiki百科风格改写训练
+- **自动退火机制**：主训练完成后自动检测checkpoint并启动退火训练
+- **独立日志记录**：每个批次和退火阶段都有独立的日志文件
+- **数据混合**：自动将领域数据和通用语料按比例混合
+
+#### 使用方法
+
+```bash
+# 直接运行三批训练脚本
+bash train_cpt_3batch.sh
+```
+
+**注意**：使用前请根据实际情况修改 [`train_cpt_3batch.sh`](train_cpt_3batch.sh) 中的配置参数：
+
+- `DOMAIN_DATA`: 领域数据路径（JSONL格式）
+- `CORPUS_DATA`: 通用语料路径
+- `GPU_IDS`: 使用的GPU编号
+- `OUTPUT_DIR`: 输出目录
+
+#### 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| [`train_cpt_3batch.sh`](train_cpt_3batch.sh) | 主训练入口脚本 |
+| [`examples/train_full/qwen2.5_7b_full_cpt_3batch.yaml`](examples/train_full/qwen2.5_7b_full_cpt_3batch.yaml) | 主训练配置 |
+| [`examples/train_full/qwen2.5_7b_full_cpt_3batch_anneal.yaml`](examples/train_full/qwen2.5_7b_full_cpt_3batch_anneal.yaml) | 退火训练配置 |
+| [`scripts/mix_cpt_data.py`](scripts/mix_cpt_data.py) | CPT数据混合脚本 |
+
 ### 快速开始
 
 下面三行命令分别对 Qwen3-4B-Instruct 模型进行 LoRA **微调**、**推理**和**合并**。
