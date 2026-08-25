@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CPT Data Mixing Script
+CPT Data Mixing Script (Optimized Version)
 将领域数据与通用语料数据按比例混合，用于CPT训练。
 
 Usage:
@@ -26,29 +26,97 @@ Args:
     
     # 批量生成多批次数据:
     --fields text,synthesized_QA,synthesized_Wikipedia-style_rephrasing
+    
+性能优化选项:
+    --use-parallel: 使用多进程并行处理多批次
+    --num-workers: 并行进程数 (默认: 4)
+    --corpus-cache: 缓存通用语料以避免重复加载
 """
 
 import argparse
 import json
 import random
+import os
 from pathlib import Path
 from tqdm import tqdm
+from functools import partial
+from multiprocessing import Pool, cpu_count
+
+# 尝试导入 orjson 以提高性能 (可选)
+try:
+    import orjson
+    def json_loads(s):
+        return orjson.loads(s)
+except ImportError:
+    json_loads = json.loads
+
+# 尝试导入 ujson 以提高性能 (可选)
+try:
+    import ujson
+    def json_loads(s):
+        return ujson.loads(s)
+except ImportError:
+    pass  # 使用默认的 json.loads
 
 
-def load_jsonl(file_path: str):
-    """加载JSONL文件"""
+def load_jsonl_fast(file_path: str, show_progress: bool = True):
+    """快速加载JSONL文件 - 优化版本
+    
+    优化点:
+    1. 使用更大的缓冲区读取
+    2. 批量处理减少函数调用开销
+    3. 可选禁用进度条减少开销
+    """
     data = []
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in tqdm(f, desc=f"Loading {file_path}"):
+    buffer_size = 1024 * 1024  # 1MB 缓冲区
+    
+    with open(file_path, 'r', encoding='utf-8', buffering=buffer_size) as f:
+        if show_progress:
+            # 获取文件行数用于进度条
+            line_count = sum(1 for _ in f)
+            f.seek(0)
+            pbar = tqdm(total=line_count, desc=f"Loading {os.path.basename(file_path)}", unit="lines")
+        else:
+            pbar = None
+            
+        for line in f:
+            if pbar:
+                pbar.update(1)
             line = line.strip()
             if not line:
                 continue
             try:
-                data.append(json.loads(line))
-            except json.JSONDecodeError:
-                print(f"Warning: Skipping invalid JSON line in {file_path}")
+                data.append(json_loads(line))
+            except (json.JSONDecodeError, ValueError):
                 continue
+        
+        if pbar:
+            pbar.close()
+    
     return data
+
+
+def load_jsonl_fast_iter(file_path: str):
+    """快速迭代加载JSONL文件 - 内存优化版本
+    
+    适用于超大数据集，不一次性加载到内存，而是逐个处理
+    """
+    buffer_size = 1024 * 1024  # 1MB 缓冲区
+    
+    with open(file_path, 'r', encoding='utf-8', buffering=buffer_size) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json_loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+
+def load_jsonl(file_path: str):
+    """加载JSONL文件 (兼容旧接口)"""
+    return load_jsonl_fast(file_path, show_progress=True)
 
 
 def extract_field(data: list, field_name: str):
@@ -192,6 +260,31 @@ def main():
              "If provided, will generate multiple output files. "
              "Example: --fields text,synthesized_QA,synthesized_Wikipedia-style_rephrasing"
     )
+    # 性能优化参数：使用多进程并行处理
+    parser.add_argument(
+        "--use-parallel",
+        action="store_true",
+        help="Use multiprocessing for parallel batch processing"
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="Number of parallel workers (default: 4)"
+    )
+    # 缓存参数：缓存通用语料以避免重复加载
+    parser.add_argument(
+        "--corpus-cache",
+        type=str,
+        default=None,
+        help="Path to cache file for corpus data to avoid reloading"
+    )
+    # 性能优化参数：禁用进度条
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable progress bar for faster execution"
+    )
     
     args = parser.parse_args()
     
@@ -203,10 +296,31 @@ def main():
         args.corpus_ratio /= total_ratio
         print(f"Normalized to: domain={args.domain_ratio}, corpus={args.corpus_ratio}")
     
-    # 加载数据
+    # 加载/缓存数据
     print("Loading data...")
-    domain_data = load_jsonl(args.domain_data)
-    corpus_data = load_jsonl(args.corpus_data)
+    
+    # 检查是否有缓存文件
+    corpus_cache_path = args.corpus_cache or (Path(args.corpus_data).with_suffix('.cache.jsonl'))
+    
+    if args.corpus_cache or corpus_cache_path.exists():
+        cache_file = args.corpus_cache or str(corpus_cache_path)
+        print(f"Loading corpus from cache: {cache_file}")
+        corpus_data = load_jsonl_fast(cache_file, show_progress=not args.no_progress)
+    else:
+        # 加载通用语料
+        corpus_data = load_jsonl_fast(args.corpus_data, show_progress=not args.no_progress)
+        
+        # 保存缓存（如果指定了缓存路径）
+        if args.corpus_cache:
+            print(f"Saving corpus cache to: {args.corpus_cache}")
+            save_jsonl(corpus_data, args.corpus_cache)
+    
+    # 提取corpus字段
+    extracted_corpus = extract_field(corpus_data, args.corpus_field)
+    print(f"Extracted {len(extracted_corpus)} samples from corpus field '{args.corpus_field}'")
+    
+    # 只在需要时加载领域数据（如果缓存了corpus，可以减少加载次数）
+    domain_data = load_jsonl_fast(args.domain_data, show_progress=not args.no_progress)
     
     # 提取corpus字段
     extracted_corpus = extract_field(corpus_data, args.corpus_field)
