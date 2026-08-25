@@ -283,7 +283,8 @@ def main():
     parser.add_argument(
         "--no-progress",
         action="store_true",
-        help="Disable progress bar for faster execution"
+        default=False,
+        help="Disable progress bar for faster execution (default: False)"
     )
     
     args = parser.parse_args()
