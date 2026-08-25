@@ -299,32 +299,28 @@ def main():
     # 加载/缓存数据
     print("Loading data...")
     
-    # 检查是否有缓存文件
-    corpus_cache_path = args.corpus_cache or (Path(args.corpus_data).with_suffix('.cache.jsonl'))
+    # 自动缓存路径：与corpus-data同目录，添加.cache后缀
+    default_cache_path = str(Path(args.corpus_data).with_suffix('.cache.jsonl'))
+    cache_file = args.corpus_cache if args.corpus_cache else default_cache_path
     
-    if args.corpus_cache or corpus_cache_path.exists():
-        cache_file = args.corpus_cache or str(corpus_cache_path)
+    # 检查缓存是否存在
+    if Path(cache_file).exists():
         print(f"Loading corpus from cache: {cache_file}")
         corpus_data = load_jsonl_fast(cache_file, show_progress=not args.no_progress)
     else:
         # 加载通用语料
         corpus_data = load_jsonl_fast(args.corpus_data, show_progress=not args.no_progress)
         
-        # 保存缓存（如果指定了缓存路径）
-        if args.corpus_cache:
-            print(f"Saving corpus cache to: {args.corpus_cache}")
-            save_jsonl(corpus_data, args.corpus_cache)
+        # 自动保存缓存
+        print(f"Saving corpus cache to: {cache_file}")
+        save_jsonl(corpus_data, cache_file)
     
     # 提取corpus字段
     extracted_corpus = extract_field(corpus_data, args.corpus_field)
     print(f"Extracted {len(extracted_corpus)} samples from corpus field '{args.corpus_field}'")
     
-    # 只在需要时加载领域数据（如果缓存了corpus，可以减少加载次数）
+    # 只在需要时加载领域数据
     domain_data = load_jsonl_fast(args.domain_data, show_progress=not args.no_progress)
-    
-    # 提取corpus字段
-    extracted_corpus = extract_field(corpus_data, args.corpus_field)
-    print(f"Extracted {len(extracted_corpus)} samples from corpus field '{args.corpus_field}'")
     
     # 判断是单字段还是批量处理
     if args.fields:
