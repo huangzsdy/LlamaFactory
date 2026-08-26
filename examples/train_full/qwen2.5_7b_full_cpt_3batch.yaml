@@ -6,7 +6,7 @@ trust_remote_code: true
 stage: pt                         # PT (预训练/继续预训练)
 do_train: true
 finetuning_type: full             # 全参数训练
-deepspeed: examples/deepspeed/ds_z2_config.json  # 使用 ZeRO Stage 2
+deepspeed: examples/deepspeed/ds_z3_offload_config.json  # 使用 ZeRO Stage 3 + CPU Offload
 
 ### dataset
 # 三批训练分别使用不同的数据集
