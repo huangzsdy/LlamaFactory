@@ -14,6 +14,7 @@ from tqdm import tqdm
 from pathlib import Path
 import torch
 import multiprocessing
+import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ==================== 配置参数 ====================
@@ -24,6 +25,28 @@ VERBOSE = True
 HF_BATCH_SIZE = 64  # HuggingFace 批量大小
 EVAL_BATCH_SIZE = 64  # 评测时的批量大小，显存充足可以设很大
 WORK_NAME="baseline" # or finetune
+
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="Fast Evaluation Script")
+    parser.add_argument("--model_path", type=str, default=None,
+                        help="Model path (overrides MODEL_PATH)")
+    parser.add_argument("--eval_file", type=str, default=None,
+                        help="Evaluation file path (single file)")
+    parser.add_argument("--work_name", type=str, default=None,
+                        help="Work name for output")
+    parser.add_argument("--output_dir", type=str, default=None,
+                        help="Output directory")
+    return parser.parse_args()
+
+
+# Parse arguments at module load
+_cli_args = parse_args()
+if _cli_args.model_path:
+    MODEL_PATH = _cli_args.model_path
+if _cli_args.work_name:
+    WORK_NAME = _cli_args.work_name
 # ==================== 尝试导入 vLLM ====================
 try:
     from vllm import LLM, SamplingParams
