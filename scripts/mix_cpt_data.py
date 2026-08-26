@@ -344,7 +344,12 @@ def main():
             
             # 生成输出文件名
             output_filename = f"batch_{field_name}.jsonl"
-            output_path = Path(args.output).parent / output_filename
+            # 如果 --output 以 .jsonl 结尾，视为文件名；否则视为目录
+            if args.output.endswith('.jsonl'):
+                output_path = Path(args.output).parent / output_filename
+            else:
+                # 视为目录，直接在该目录下创建文件
+                output_path = Path(args.output) / output_filename
             
             # 混合数据
             mixed_data = mix_data(
