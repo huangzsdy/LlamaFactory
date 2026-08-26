@@ -62,7 +62,7 @@ run_main_train() {
     echo "Starting batch $batch_name main training, GPU: $gpu_id, log: $log_file"
     
     # Run with nohup in background
-    FORCE_TORCHRUN=1 CUDA_VISIBLE_DEVICES=$gpu_id nohup llamafactory-cli train \
+    CUDA_VISIBLE_DEVICES=$gpu_id nohup llamafactory-cli train \
         examples/train_full/qwen2.5_7b_full_cpt_3batch.yaml \
         dataset=$dataset_name \
         output_dir="$OUTPUT_DIR/$output_subdir" \
@@ -89,7 +89,7 @@ check_and_run_anneal() {
         mkdir -p "$OUTPUT_DIR/logs"
         
         # Run annealing with nohup
-        FORCE_TORCHRUN=1 CUDA_VISIBLE_DEVICES=$gpu_id nohup llamafactory-cli train \
+        CUDA_VISIBLE_DEVICES=$gpu_id nohup llamafactory-cli train \
             examples/train_full/qwen2.5_7b_full_cpt_3batch_anneal.yaml \
             dataset=$anneal_dataset \
             output_dir="$anneal_output_dir" \

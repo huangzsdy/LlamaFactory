@@ -5,8 +5,12 @@ trust_remote_code: true
 ### method
 stage: pt                         # PT (预训练/继续预训练)
 do_train: true
-finetuning_type: full             # 全参数训练
-deepspeed: examples/deepspeed/ds_z3_config.json
+finetuning_type: lora             # 改为 LoRA 节省显存
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.05
+lora_target: all
+deepspeed: null                  # LoRA 不需要 DeepSpeed
 
 ### dataset
 # 退火训练数据集 - 需要先用mix脚本生成anneal数据
