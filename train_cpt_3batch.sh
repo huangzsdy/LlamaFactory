@@ -64,8 +64,8 @@ run_main_train() {
     # Run with nohup in background
     CUDA_VISIBLE_DEVICES=$gpu_id nohup llamafactory-cli train \
         examples/train_full/qwen2.5_7b_full_cpt_3batch.yaml \
-        --dataset $dataset_name \
-        --output_dir "$OUTPUT_DIR/$output_subdir" \
+        dataset=$dataset_name \
+        output_dir="$OUTPUT_DIR/$output_subdir" \
         > "$log_file" 2>&1 &
     
     echo "Main training started, PID: $!, log: $log_file"
@@ -91,11 +91,11 @@ check_and_run_anneal() {
         # Run annealing with nohup
         CUDA_VISIBLE_DEVICES=$gpu_id nohup llamafactory-cli train \
             examples/train_full/qwen2.5_7b_full_cpt_3batch_anneal.yaml \
-            --dataset $anneal_dataset \
-            --output_dir "$anneal_output_dir" \
-            --resume_from_checkpoint "$checkpoint_path" \
-            --learning_rate $ANNEAL_LEARNING_RATE \
-            --max_steps $ANNEAL_STEPS \
+            dataset=$anneal_dataset \
+            output_dir="$anneal_output_dir" \
+            resume_from_checkpoint="$checkpoint_path" \
+            learning_rate=$ANNEAL_LEARNING_RATE \
+            max_steps=$ANNEAL_STEPS \
             > "$log_file" 2>&1 &
         
         echo "Annealing started, PID: $!, log: $log_file"
