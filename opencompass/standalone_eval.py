@@ -42,10 +42,21 @@ LONGDEP_EVIDENCE_OVERLAP_THRESHOLD = 0.3  # evidence 句子与推理过程的词
 
 def load_jsonl(file_path):
     data = []
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            if line.strip():
-                data.append(json.loads(line))
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        data.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        print(f"警告: 跳过无法解析的行: {e}")
+                        continue
+    except FileNotFoundError:
+        print(f"错误: 文件不存在: {file_path}")
+        raise
+    except Exception as e:
+        print(f"错误: 读取文件失败: {e}")
+        raise
     return data
 
 def load_xlsx(file_path):
@@ -682,7 +693,7 @@ def main():
                 if str(i) in details:
                     continue
                 task_json = {
-                    'prompt': item.get('prompt', ''),
+                    'prompt': item.get('prompt', ''),   
                     'canonical_solution': item.get('canonical_solution', ''),
                     'test': item.get('test', ''),
                     'entry_point': item.get('entry_point', ''),
@@ -871,7 +882,7 @@ def main():
                         'target_extracted': target_extracted,
                         'correct': is_correct,
                         'reason': reason
-                    })
+                    }
                     
                     if VERBOSE:
                         pred_num = extract_gsm8k_answer(prediction) or prediction[:30]
@@ -919,7 +930,7 @@ def main():
                         'target': target,
                         'correct': is_correct,
                         'reason': reason
-                    })
+                    }
                     
                     if VERBOSE:
                         print(f"\n--- 样本 {i+1}/{total} ---")
@@ -964,7 +975,7 @@ def main():
                         'prediction': prediction[:100],
                         'correct': is_correct,
                         'reason': reason
-                    })
+                    }
                     
                     if VERBOSE:
                         print(f"\n--- 样本 {i+1}/{total} ---")
@@ -1008,7 +1019,7 @@ def main():
                         'prediction': prediction[:50],
                         'target': answer,
                         'correct': is_correct,
-                    })
+                    }
                     
                     if VERBOSE:
                         print(f"\n--- 样本 {i+1}/{total} ---")
@@ -1060,7 +1071,7 @@ def main():
                         'prediction': prediction[:50],
                         'target': ground_truth,
                         'correct': is_correct,
-                    })
+                    }
                     
                     if VERBOSE:
                         print(f"\n--- 样本 {i+1}/{total} ---")

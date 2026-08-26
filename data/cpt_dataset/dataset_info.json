@@ -24,7 +24,7 @@
     "description": "Main training: Wikipedia-style rephrasing 60% + corpus 40%"
   },
   "anneal_text": {
-    "file_name": "anneal/anneal_text.jsonl",
+    "file_name": "anneal/batch_text.jsonl",
     "formatting": "alpaca",
     "columns": {
       "prompt": "text"
@@ -32,7 +32,7 @@
     "description": "Annealing: original text 70% + corpus 30%"
   },
   "anneal_synthesized_QA": {
-    "file_name": "anneal/anneal_synthesized_QA.jsonl",
+    "file_name": "anneal/batch_synthesized_QA.jsonl",
     "formatting": "alpaca",
     "columns": {
       "prompt": "text"
@@ -40,7 +40,7 @@
     "description": "Annealing: QA pairs 70% + corpus 30%"
   },
   "anneal_synthesized_Wikipedia-style_rephrasing": {
-    "file_name": "anneal/anneal_synthesized_Wikipedia-style_rephrasing.jsonl",
+    "file_name": "anneal/batch_synthesized_Wikipedia-style_rephrasing.jsonl",
     "formatting": "alpaca",
     "columns": {
       "prompt": "text"

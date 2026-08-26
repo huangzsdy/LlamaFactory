@@ -761,6 +761,36 @@ bash train_cpt_3batch.sh
 | [`examples/train_full/qwen2.5_7b_full_cpt_3batch_anneal.yaml`](examples/train_full/qwen2.5_7b_full_cpt_3batch_anneal.yaml) | 退火训练配置 |
 | [`scripts/mix_cpt_data.py`](scripts/mix_cpt_data.py) | CPT数据混合脚本 |
 
+#### CPT 模型评测
+
+训练完成后，可以使用评测脚本对模型进行评估：
+
+##### eval_cpt_3batch.sh
+
+评测脚本，评估 CPT 训练前后的模型效果。
+
+```bash
+# 运行评测
+bash eval_cpt_3batch.sh
+```
+
+评测内容：
+1. **Base Model** - 原始基线模型
+2. **CPT Models (Before Annealing)** - 三批训练后的模型
+3. **Annealed Models** - 退火后的模型
+
+##### standalone_eval_fast.py
+
+快速评测脚本，支持命令行参数：
+
+```bash
+python opencompass/standalone_eval_fast.py \
+    --model_path /path/to/model \
+    --eval_file /path/to/dataset.xlsx \
+    --work_name baseline \
+    --output_dir ./eval_results
+```
+
 ### 快速开始
 
 下面三行命令分别对 Qwen3-4B-Instruct 模型进行 LoRA **微调**、**推理**和**合并**。
